@@ -10,6 +10,7 @@ import { McpAuthProvider, signInGeneration } from './auth/provider.js';
 import { createMcpServer, type ToolDeps } from './tools.js';
 import { sendFirstRunPage } from './first-run-page.js';
 import { whoopMessage } from './whoop-messages.js';
+import { jsonExceptStore, registerWebApi, webCors } from './web-api.js';
 
 export interface AppDeps extends Omit<ToolDeps, 'redirectUri' | 'mode' | 'whoopConfigured' | 'publicUrl'> {
 	config: Config;
@@ -51,7 +52,8 @@ export function createApp({ config, db, client, authStates, updates, log = logTo
 	const app = express();
 	// The rate limits below need the client's address; see TRUST_PROXY in config.ts.
 	app.set('trust proxy', config.trustProxy);
-	app.use(express.json());
+	app.use(webCors(config.allowedRedirectHosts));
+	app.use(jsonExceptStore());
 
 	const { generation, passwordChanged } = signInGeneration(db, config.authPassword);
 	if (passwordChanged) {
@@ -168,6 +170,8 @@ export function createApp({ config, db, client, authStates, updates, log = logTo
 		res.set('Allow', 'POST');
 		jsonRpcError(res, 405, 'Method not allowed');
 	});
+
+	registerWebApi(app, { client, db, requireAuth });
 
 	app.get('/sse', (_req: Request, res: Response) => {
 		res.status(410).send('SSE endpoint deprecated. Use /mcp with Streamable HTTP transport.');
