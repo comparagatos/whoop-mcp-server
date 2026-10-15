@@ -11,12 +11,28 @@ import { whoopMessage } from './whoop-messages.js';
  *   bearer token from the same sign-in as /mcp, so the password stays the only way in.
  * - GET /api/whoop?days=N: WHOOP's own records (cycles, recoveries, sleeps incl. naps,
  *   workouts) as JSON, so the app doesn't parse the tools' Markdown.
- * - GET/PUT /api/store: one JSON document the app keeps here, so its history survives a
- *   wiped browser or a new phone. It lives in the same database as the sign-ins.
+ * - GET/PUT /api/store[?profile=name]: one JSON document per person using the app, so its
+ *   history survives a wiped browser or a new phone. It lives in the same database as the sign-ins.
+ * - GET/PUT /api/log?day=YYYYMMDD[&profile=name]: the 24-hour heart-rate record the iOS app
+ *   keeps (one row every 10 s), one document per person and day.
+ * - GET /api/log/days[?profile=name]: which days have a record.
  */
 
 const STORE_KEY = 'web_app_store';
 const STORE_LIMIT = '8mb';
+const LOG_LIMIT = '2mb';
+const PROFILE = /^[a-z0-9_-]{1,32}$/;
+const DAY = /^\d{8}$/;
+
+/** The person a request is for: empty means the owner, which keeps the original store key. */
+function profileOf(req: Request): string | null {
+	const raw = String(req.query.profile ?? '').trim().toLowerCase();
+	if (raw === '') return '';
+	return PROFILE.test(raw) ? raw : null;
+}
+
+const storeKey = (profile: string) => (profile ? `${STORE_KEY}:${profile}` : STORE_KEY);
+const logKey = (profile: string, day: string) => `web_app_log:${profile || 'owner'}:${day}`;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function webCors(allowedHosts: readonly string[]): RequestHandler {
@@ -54,7 +70,7 @@ export function webCors(allowedHosts: readonly string[]): RequestHandler {
 /** The global JSON parser must skip /api/store, which takes larger bodies after sign-in is checked. */
 export function jsonExceptStore(): RequestHandler {
 	const json = express.json();
-	return (req: Request, res: Response, next: NextFunction) => (req.path === '/api/store' ? next() : json(req, res, next));
+	return (req: Request, res: Response, next: NextFunction) => (req.path === '/api/store' || req.path === '/api/log' ? next() : json(req, res, next));
 }
 
 function whoopFailure(res: Response, error: unknown): void {
@@ -86,8 +102,13 @@ export function registerWebApi(app: Express, deps: { client: WhoopClient; db: Wh
 		}
 	});
 
-	app.get('/api/store', requireAuth, (_req: Request, res: Response) => {
-		const raw = db.getSetting(STORE_KEY);
+	app.get('/api/store', requireAuth, (req: Request, res: Response) => {
+		const profile = profileOf(req);
+		if (profile === null) {
+			res.status(400).json({ error: 'bad_request', message: 'profile: letters, numbers, - or _, up to 32.' });
+			return;
+		}
+		const raw = db.getSetting(storeKey(profile));
 		res.set('Cache-Control', 'no-store');
 		if (!raw) {
 			res.json({ data: null, updatedAt: null });
@@ -97,13 +118,60 @@ export function registerWebApi(app: Express, deps: { client: WhoopClient; db: Wh
 	});
 
 	app.put('/api/store', requireAuth, express.json({ limit: STORE_LIMIT }), (req: Request, res: Response) => {
+		const profile = profileOf(req);
+		if (profile === null) {
+			res.status(400).json({ error: 'bad_request', message: 'profile: letters, numbers, - or _, up to 32.' });
+			return;
+		}
 		const data = req.body?.data;
 		if (data === undefined || data === null || typeof data !== 'object') {
 			res.status(400).json({ error: 'bad_request', message: 'Send {"data": {...}}.' });
 			return;
 		}
 		const updatedAt = new Date().toISOString();
-		db.setSetting(STORE_KEY, JSON.stringify({ data, updatedAt }));
+		db.setSetting(storeKey(profile), JSON.stringify({ data, updatedAt }));
 		res.json({ ok: true, updatedAt });
+	});
+
+	app.get('/api/log/days', requireAuth, (req: Request, res: Response) => {
+		const profile = profileOf(req);
+		if (profile === null) {
+			res.status(400).json({ error: 'bad_request', message: 'Bad profile.' });
+			return;
+		}
+		res.set('Cache-Control', 'no-store');
+		res.json({ days: db.settingKeys(`web_app_log:${profile || 'owner'}:`).map(k => k.slice(-8)).sort() });
+	});
+
+	app.get('/api/log', requireAuth, (req: Request, res: Response) => {
+		const profile = profileOf(req);
+		const day = String(req.query.day ?? '');
+		if (profile === null || !DAY.test(day)) {
+			res.status(400).json({ error: 'bad_request', message: 'Use ?day=YYYYMMDD and an optional profile.' });
+			return;
+		}
+		res.set('Cache-Control', 'no-store');
+		const raw = db.getSetting(logKey(profile, day));
+		if (!raw) {
+			res.json({ day, data: [], updatedAt: null });
+			return;
+		}
+		res.type('application/json').send(raw);
+	});
+
+	app.put('/api/log', requireAuth, express.json({ limit: LOG_LIMIT }), (req: Request, res: Response) => {
+		const profile = profileOf(req);
+		const day = String(req.query.day ?? '');
+		const rows = req.body?.data;
+		if (profile === null || !DAY.test(day) || !Array.isArray(rows) || rows.length > 20000) {
+			res.status(400).json({ error: 'bad_request', message: 'Send {"data": [[t, hr, hrv], ...]} with ?day=YYYYMMDD.' });
+			return;
+		}
+		const clean = rows.filter(
+			(r: unknown): r is number[] => Array.isArray(r) && r.length === 3 && r.every(v => typeof v === 'number' && Number.isFinite(v)),
+		);
+		const updatedAt = new Date().toISOString();
+		db.setSetting(logKey(profile, day), JSON.stringify({ day, data: clean, updatedAt }));
+		res.json({ ok: true, rows: clean.length, updatedAt });
 	});
 }

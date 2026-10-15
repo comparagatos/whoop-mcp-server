@@ -199,6 +199,12 @@ export class WhoopDatabase {
 		return row?.value;
 	}
 
+	/** Setting keys that start with a prefix (used for the web app's per-day records). */
+	settingKeys(prefix: string): string[] {
+		const rows = this.db.prepare("SELECT key FROM settings WHERE substr(key, 1, ?) = ?").all(prefix.length, prefix) as { key: string }[];
+		return rows.map(row => row.key);
+	}
+
 	setSetting(key: string, value: string): void {
 		this.db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 	}
