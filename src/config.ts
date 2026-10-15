@@ -29,7 +29,8 @@ export class ConfigError extends Error {
 const MIN_PASSWORD_LENGTH = 16;
 // Claude (web, desktop and mobile) returns to claude.ai, moving to claude.com; ChatGPT
 // returns to chatgpt.com. Other web clients are added with MCP_ALLOWED_REDIRECT_HOSTS.
-const DEFAULT_REDIRECT_HOSTS = ['claude.ai', 'claude.com', 'chatgpt.com'];
+// comparagatos.github.io: the owner's WOD Live web app (see web-api.ts).
+const DEFAULT_REDIRECT_HOSTS = ['claude.ai', 'claude.com', 'chatgpt.com', 'comparagatos.github.io'];
 const HOST_NAME = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
