@@ -56,12 +56,12 @@ describe('loadConfig', () => {
 	});
 
 	it('allows Claude and ChatGPT as sign-in destinations by default', () => {
-		assert.deepEqual(loadConfig({ MCP_AUTH_PASSWORD: PASSWORD }).allowedRedirectHosts, ['claude.ai', 'claude.com', 'chatgpt.com']);
+		assert.deepEqual(loadConfig({ MCP_AUTH_PASSWORD: PASSWORD }).allowedRedirectHosts, ['claude.ai', 'claude.com', 'chatgpt.com', 'comparagatos.github.io']);
 	});
 
 	it('adds hosts from MCP_ALLOWED_REDIRECT_HOSTS', () => {
 		const config = loadConfig({ MCP_AUTH_PASSWORD: PASSWORD, MCP_ALLOWED_REDIRECT_HOSTS: ' Mcp-Client.example, claude.ai ,' });
-		assert.deepEqual(config.allowedRedirectHosts, ['claude.ai', 'claude.com', 'chatgpt.com', 'mcp-client.example']);
+		assert.deepEqual(config.allowedRedirectHosts, ['claude.ai', 'claude.com', 'chatgpt.com', 'comparagatos.github.io', 'mcp-client.example']);
 	});
 
 	it('refuses MCP_ALLOWED_REDIRECT_HOSTS entries that are not host names', () => {
